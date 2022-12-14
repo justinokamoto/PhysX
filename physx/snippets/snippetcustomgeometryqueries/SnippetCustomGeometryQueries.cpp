@@ -33,6 +33,7 @@
 
 #include <ctype.h>
 #include <vector>
+#include <iostream>
 #include "PxPhysicsAPI.h"
 
 // temporary disable this snippet, cannot work without rendering we cannot include GL directly
@@ -42,6 +43,9 @@
 #include "../snippetcommon/SnippetPVD.h"
 #include "../snippetutils/SnippetUtils.h"
 #include "../snippetrender/SnippetRender.h"
+#include "../../include/omnipvd/PxOmniPvd.h"
+#include "../../pvdruntime/include/OmniPvdFileWriteStream.h"
+#include "../../pvdruntime/include/OmniPvdWriter.h"
 
 using namespace physx;
 
@@ -121,7 +125,7 @@ static PxPhysics* gPhysics = NULL;
 static PxDefaultCpuDispatcher* gDispatcher = NULL;
 static PxScene* gScene = NULL;
 static PxMaterial* gMaterial = NULL;
-static PxPvd* gPvd = NULL;
+static PxOmniPvd *omniPvd = NULL;
 static PxRigidDynamic* gActor = NULL;
 
 static BarCrosss gBarCrosss;
@@ -138,12 +142,18 @@ static PxRigidDynamic* createDynamic(const PxTransform& t, const PxGeometry& geo
 void initPhysics(bool /*interactive*/)
 {
 	gFoundation = PxCreateFoundation(PX_PHYSICS_VERSION, gAllocator, gErrorCallback);
+        omniPvd = PxCreateOmniPvd(*gFoundation);
+        OmniPvdWriter* omniWriter = omniPvd->getWriter();
+        omniWriter->setLogFunction([](char *logMsg) {std::cout << logMsg << std::endl;});
 
-	gPvd = PxCreatePvd(*gFoundation);
-	PxPvdTransport* transport = PxDefaultPvdSocketTransportCreate(PVD_HOST, 5425, 10);
-	gPvd->connect(*transport, PxPvdInstrumentationFlag::eALL);
+        OmniPvdFileWriteStream* omniFileWriteStream = omniPvd->getFileWriteStream();
 
-	gPhysics = PxCreatePhysics(PX_PHYSICS_VERSION, *gFoundation, PxTolerancesScale(), true, gPvd);
+        omniWriter->setWriteStream(omniFileWriteStream);
+
+	gPhysics = PxCreatePhysics(PX_PHYSICS_VERSION, *gFoundation, PxTolerancesScale(), true, nullptr, omniPvd);
+
+        omniFileWriteStream->setFileName("/tmp/myoutpufile.ovd");
+        omniPvd->startSampling();
 
 	PxSceneDesc sceneDesc(gPhysics->getTolerancesScale());
 	sceneDesc.gravity = PxVec3(0.0f, -9.81f * 3, 0.0f);
@@ -152,14 +162,6 @@ void initPhysics(bool /*interactive*/)
 	sceneDesc.filterShader = PxDefaultSimulationFilterShader;
 
 	gScene = gPhysics->createScene(sceneDesc);
-
-	PxPvdSceneClient* pvdClient = gScene->getScenePvdClient();
-	if (pvdClient)
-	{
-		pvdClient->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_CONSTRAINTS, true);
-		pvdClient->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_CONTACTS, true);
-		pvdClient->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_SCENEQUERIES, true);
-	}
 
 	gMaterial = gPhysics->createMaterial(0.5f, 0.5f, 0.6f);
 
@@ -225,12 +227,7 @@ void cleanupPhysics(bool /*interactive*/)
 	PX_RELEASE(gScene);
 	PX_RELEASE(gDispatcher);
 	PX_RELEASE(gPhysics);
-	if (gPvd)
-	{
-		PxPvdTransport* transport = gPvd->getTransport();
-		gPvd->release();	gPvd = NULL;
-		PX_RELEASE(transport);
-	}
+        omniPvd->release();
 	PX_RELEASE(gFoundation);
 
 	printf("SnippetGeometryQueries done.\n");
